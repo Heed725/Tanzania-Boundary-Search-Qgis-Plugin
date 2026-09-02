@@ -1,0 +1,18 @@
+[general]
+name=Tanzania Boundary Search
+description=Type Tanzania place names directly in the QGIS Coordinate field to load boundaries.
+about=Type a Tanzanian place name directly in QGIS's existing Coordinate field, choose an autocomplete suggestion, and load only its matching GADM boundary. Ordinary coordinate entry continues to work normally.
+version=1.0.0
+qgisMinimumVersion=3.22
+author=Hemed Lungo
+email=Hemedlungo@gmail.com
+category=Vector
+icon=icon.svg
+tags=Tanzania,boundary,autocomplete,region,district,ward,GADM
+homepage=https://github.com/Heed725/Tanzania-Boundary-Search-Qgis-Plugin
+repository=https://github.com/Heed725/Tanzania-Boundary-Search-Qgis-Plugin
+tracker=https://github.com/Heed725/Tanzania-Boundary-Search-Qgis-Plugin/issues
+experimental=False
+deprecated=False
+hasProcessingProvider=no
+server=False
