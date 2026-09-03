@@ -20,7 +20,7 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 
-BUILDER_VERSION = "1.0.0"
+BUILDER_VERSION = "1.1.0"
 SIDECAR_EXTENSIONS = {
     ".shp",
     ".shx",
@@ -35,6 +35,14 @@ SIDECAR_EXTENSIONS = {
 DEFAULT_AUTHOR = "Hemed Lungo"
 DEFAULT_EMAIL = "Hemedlungo@gmail.com"
 DEFAULT_HOMEPAGE = "https://github.com/Heed725"
+DEFAULT_LEVEL_LABELS = {
+    0: "Country",
+    1: "Region",
+    2: "District",
+    3: "Ward",
+    4: "Administrative level 4",
+    5: "Administrative level 5",
+}
 
 
 PLUGIN_TEMPLATE = r'''"""@@PLUGIN_NAME@@ QGIS plugin."""
@@ -499,16 +507,22 @@ def detect_level(shapefile: Path, lookup: dict[str, str]) -> int:
 
 
 def name_field_for(level: int, lookup: dict[str, str]) -> str | None:
+    level_specific = {
+        0: ["COUNTRY", "SOVEREIGNT", "ADMIN0", "ADM0_NAME"],
+        1: ["REGION", "STATE", "PROVINCE", "ADM1_NAME", "ADMIN1"],
+        2: ["DISTRICT", "COUNTY", "MUNICIPAL", "MUNICIPALI", "ADM2_NAME", "ADMIN2"],
+        3: ["WARD", "SUBDIST", "SUB_DIST", "COMMUNE", "BARANGAY", "ADM3_NAME", "ADMIN3"],
+        4: ["NAME_4", "ADM4_NAME", "ADMIN4", "VILLAGE", "LOCALITY"],
+        5: ["NAME_5", "ADM5_NAME", "ADMIN5", "VILLAGE", "LOCALITY"],
+    }
     candidates = [
         "NAME_{}".format(level),
         "NAME{}".format(level),
         "ADM{}_NAME".format(level),
         "ADMIN{}_NAME".format(level),
     ]
-    if level == 0:
-        candidates.extend(["COUNTRY", "SOVEREIGNT", "ADMIN", "NAME_EN", "NAME"])
-    else:
-        candidates.extend(["NAME_EN", "NAME", "ADMIN", "REGION", "PROVINCE", "DISTRICT"])
+    candidates.extend(level_specific.get(level, []))
+    candidates.extend(["NAME_EN", "NAME", "ADMIN"])
     return first_field(lookup, candidates)
 
 
@@ -525,6 +539,9 @@ def id_field_for(level: int, lookup: dict[str, str]) -> str | None:
             "ISO_{}".format(level),
             "ISO_A3",
             "ADM0_A3",
+            "CODE",
+            "UID",
+            "ID",
             "OBJECTID",
             "FID",
         ],
@@ -538,6 +555,173 @@ def parent_name_fields(level: int, lookup: dict[str, str]) -> list[str]:
         if field and field not in result:
             result.append(field)
     return result
+
+
+def list_shapefiles(extraction_root: Path) -> list[Path]:
+    return sorted(
+        (
+            path
+            for path in extraction_root.rglob("*")
+            if path.is_file() and path.suffix.casefold() == ".shp"
+        ),
+        key=lambda path: path.relative_to(extraction_root).as_posix().casefold(),
+    )
+
+
+def detect_gadm_specs(shapefiles: list[Path]) -> dict[Path, dict[str, object]] | None:
+    """Return automatic level mappings only when every input is recognizably GADM."""
+    if not shapefiles:
+        return None
+    specs: dict[Path, dict[str, object]] = {}
+    for shapefile in shapefiles:
+        match = re.match(r"^gadm\d+_[a-z0-9-]+_([0-5])$", shapefile.stem, re.IGNORECASE)
+        if not match:
+            return None
+        level = int(match.group(1))
+        dbf_path = sidecar_path(shapefile, ".dbf")
+        if not dbf_path.is_file():
+            return None
+        fields, _ = read_dbf(dbf_path)
+        lookup = field_lookup(fields)
+        if "GID_{}".format(level) not in lookup:
+            return None
+        if not name_field_for(level, lookup):
+            return None
+        specs[shapefile] = {"level": level}
+    return specs
+
+
+def print_fields(fields: list[dict[str, object]]) -> None:
+    print("    Available fields:")
+    for number, field in enumerate(fields, start=1):
+        print(
+            "      {:>2}. {} ({})".format(number, field["name"], field["type"])
+        )
+
+
+def prompt_field(
+    label: str,
+    fields: list[dict[str, object]],
+    default: str | None,
+    allow_none: bool = False,
+) -> str | None:
+    names = [str(field["name"]) for field in fields]
+    by_casefold = {name.casefold(): name for name in names}
+    while True:
+        default_label = default if default else ("0" if allow_none else "required")
+        raw = input("    {} [{}]: ".format(label, default_label)).strip()
+        if not raw:
+            if default:
+                return default
+            if allow_none:
+                return None
+            print("    Choose a field by its number or name.")
+            continue
+        if allow_none and raw == "0":
+            return None
+        if raw.isdigit() and 1 <= int(raw) <= len(names):
+            return names[int(raw) - 1]
+        match = by_casefold.get(raw.casefold())
+        if match:
+            return match
+        print("    Unknown field. Enter a listed number or field name.")
+
+
+def prompt_shapefile_selection(
+    level: int,
+    extraction_root: Path,
+    shapefiles: list[Path],
+    used: set[Path],
+) -> list[Path] | None:
+    available = [path for path in shapefiles if path not in used]
+    if not available:
+        return None
+    print()
+    print("Shapefiles available for Level {}:".format(level))
+    for number, path in enumerate(available, start=1):
+        print("  {:>2}. {}".format(number, path.relative_to(extraction_root).as_posix()))
+    while True:
+        suffix = " (required)" if level == 0 else " or press Enter to finish"
+        raw = input(
+            "Select shapefile number(s) for Level {}{}: ".format(level, suffix)
+        ).strip()
+        if not raw:
+            if level == 0:
+                print("Level 0 needs at least one shapefile.")
+                continue
+            return None
+        tokens = [token for token in re.split(r"[, ]+", raw) if token]
+        try:
+            indexes = [int(token) for token in tokens]
+        except ValueError:
+            print("Enter one number, or several numbers separated by commas.")
+            continue
+        if not indexes or any(index < 1 or index > len(available) for index in indexes):
+            print("One or more selections are outside the displayed list.")
+            continue
+        selected = []
+        for index in indexes:
+            path = available[index - 1]
+            if path not in selected:
+                selected.append(path)
+        return selected
+
+
+def configure_non_gadm(
+    extraction_root: Path, shapefiles: list[Path]
+) -> dict[Path, dict[str, object]]:
+    """Interactively map non-GADM shapefiles to optional levels 0 through 5."""
+    print()
+    print("GADM structure was not detected.")
+    print("Assign the shapefiles manually. Level 0 is required; Levels 1-5 are optional.")
+    print("At the next level, press Enter whenever your hierarchy is complete.")
+    specs: dict[Path, dict[str, object]] = {}
+    used: set[Path] = set()
+
+    for level in range(6):
+        selected = prompt_shapefile_selection(level, extraction_root, shapefiles, used)
+        if not selected:
+            if level == 0:
+                raise ValueError("Non-GADM data requires a Level 0 shapefile.")
+            print("Classification finished at Level {}.".format(level - 1))
+            break
+        default_category = DEFAULT_LEVEL_LABELS[level]
+        category = input(
+            "Category name for Level {} [{}]: ".format(level, default_category)
+        ).strip() or default_category
+
+        for shapefile in selected:
+            print()
+            print("  Configure {}".format(shapefile.relative_to(extraction_root).as_posix()))
+            dbf_path = sidecar_path(shapefile, ".dbf")
+            if not dbf_path.is_file():
+                raise ValueError("{} has no matching .dbf file.".format(shapefile.name))
+            fields, _ = read_dbf(dbf_path)
+            lookup = field_lookup(fields)
+            print_fields(fields)
+            detected_name = name_field_for(level, lookup)
+            detected_id = id_field_for(level, lookup)
+            name_field = prompt_field("Boundary name field", fields, detected_name)
+            id_field = prompt_field(
+                "Unique ID field (0 = use name and parent fields)",
+                fields,
+                detected_id,
+                allow_none=True,
+            )
+            specs[shapefile] = {
+                "level": level,
+                "category": clean_text(category),
+                "name_field": name_field,
+                "id_field": id_field,
+            }
+            used.add(shapefile)
+    if not specs:
+        raise ValueError("No shapefiles were assigned.")
+    ignored = [path for path in shapefiles if path not in used]
+    if ignored:
+        print()
+        print("Ignored {} unassigned shapefile(s).".format(len(ignored)))
+    return specs
 
 
 def admin_type_for(level: int, record: dict[str, object], lookup: dict[str, str]) -> str:
@@ -576,7 +760,7 @@ def aliases_for(
                 and alias.casefold() not in {"na", "n/a", "none", "null", "<null>", "unknown"}
                 and alias.casefold() != name.casefold()
                 and alias.casefold() not in {
-                item.casefold() for item in aliases
+                    item.casefold() for item in aliases
                 }
             ):
                 aliases.append(alias)
@@ -584,7 +768,10 @@ def aliases_for(
 
 
 def build_entries(
-    extraction_root: Path, copied_sources: dict[Path, str], area_name: str
+    extraction_root: Path,
+    copied_sources: dict[Path, str],
+    area_name: str,
+    specs: dict[Path, dict[str, object]],
 ) -> list[dict[str, object]]:
     entries: list[dict[str, object]] = []
     country_names: set[str] = set()
@@ -594,14 +781,20 @@ def build_entries(
             raise ValueError("Missing DBF for {}".format(shapefile.name))
         fields, records = read_dbf(dbf_path)
         lookup = field_lookup(fields)
-        level = detect_level(shapefile, lookup)
-        name_field = name_field_for(level, lookup)
+        spec = specs.get(shapefile, {})
+        level = int(spec.get("level", detect_level(shapefile, lookup)))
+        name_field = str(spec["name_field"]) if spec.get("name_field") else name_field_for(level, lookup)
         if not name_field:
             raise ValueError(
                 "Could not find a name field in {}. Expected NAME_{}, COUNTRY, NAME, "
                 "ADMIN, REGION, PROVINCE, or DISTRICT.".format(dbf_path.name, level)
             )
-        id_field = id_field_for(level, lookup)
+        id_field = (
+            spec.get("id_field")
+            if "id_field" in spec
+            else id_field_for(level, lookup)
+        )
+        id_field = str(id_field) if id_field else None
         parent_fields = parent_name_fields(level, lookup)
         source = copied_sources[shapefile]
         country_field = name_field_for(0, lookup)
@@ -615,7 +808,7 @@ def build_entries(
             country_name = clean_text(record.get(country_field)) if country_field else ""
             if country_name:
                 country_names.add(country_name.casefold())
-            admin_type = admin_type_for(level, record, lookup)
+            admin_type = clean_text(spec.get("category")) or admin_type_for(level, record, lookup)
             filters: list[dict[str, object]] = []
             if id_field and record.get(id_field) not in {None, ""}:
                 filters.append({"field": id_field, "value": record[id_field]})
@@ -683,11 +876,12 @@ def build_entries(
     return entries
 
 
-def discover_and_copy_data(extraction_root: Path, data_destination: Path) -> dict[Path, str]:
-    shapefiles = sorted(
-        (path for path in extraction_root.rglob("*") if path.is_file() and path.suffix.lower() == ".shp"),
-        key=lambda path: path.as_posix().casefold(),
-    )
+def discover_and_copy_data(
+    extraction_root: Path,
+    data_destination: Path,
+    selected_shapefiles: list[Path] | None = None,
+) -> dict[Path, str]:
+    shapefiles = selected_shapefiles or list_shapefiles(extraction_root)
     if not shapefiles:
         raise ValueError("The selected ZIP contains no .shp files.")
 
@@ -776,6 +970,7 @@ def build_plugin(
     author: str = DEFAULT_AUTHOR,
     email: str = DEFAULT_EMAIL,
     homepage: str = DEFAULT_HOMEPAGE,
+    force_manual: bool = False,
 ) -> Path:
     area_name = clean_text(area_name)
     plugin_name = clean_text(plugin_name) if plugin_name else "{} Boundary Search".format(area_name)
@@ -804,8 +999,22 @@ def build_plugin(
         data_directory.mkdir(parents=True)
 
         safe_extract(data_zip, extracted)
-        copied_sources = discover_and_copy_data(extracted, data_directory)
-        entries = build_entries(extracted, copied_sources, area_name)
+        shapefiles = list_shapefiles(extracted)
+        if not shapefiles:
+            raise ValueError("The selected ZIP contains no .shp files.")
+        specs = None if force_manual else detect_gadm_specs(shapefiles)
+        if specs is not None:
+            levels = sorted({int(spec["level"]) for spec in specs.values()})
+            print("Detected GADM data. Automatically classified level(s): {}".format(
+                ", ".join(str(level) for level in levels)
+            ))
+        else:
+            specs = configure_non_gadm(extracted, shapefiles)
+        selected_shapefiles = list(specs)
+        copied_sources = discover_and_copy_data(
+            extracted, data_directory, selected_shapefiles
+        )
+        entries = build_entries(extracted, copied_sources, area_name, specs)
         shutil.copy2(icon_path, plugin_directory / icon_file)
 
         source = render_plugin_source(plugin_name, area_name, icon_file, property_key)
@@ -876,6 +1085,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--author", default=DEFAULT_AUTHOR)
     parser.add_argument("--email", default=DEFAULT_EMAIL)
     parser.add_argument("--homepage", default=DEFAULT_HOMEPAGE)
+    parser.add_argument(
+        "--force-manual",
+        action="store_true",
+        help="Open the non-GADM Level 0-5 assignment workflow even for GADM data",
+    )
     return parser.parse_args()
 
 
@@ -922,6 +1136,7 @@ def main() -> int:
             author=args.author,
             email=args.email,
             homepage=args.homepage,
+            force_manual=args.force_manual,
         )
     except (OSError, ValueError, zipfile.BadZipFile) as error:
         print("\nERROR: {}".format(error), file=sys.stderr)

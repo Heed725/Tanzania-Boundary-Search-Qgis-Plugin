@@ -63,7 +63,7 @@ The included Windows pipeline can create another boundary-search plugin for **Af
 4. Choose an SVG/PNG icon and a ZIP containing complete shapefiles.
 5. Install the generated ZIP from QGIS's **Install from ZIP** page.
 
-The builder uses ordinary Python 3 and requires no pip packages, GDAL, GeoPandas, or Fiona. See the [complete builder instructions](BoundaryPluginBuilder/README.md).
+GADM levels are classified automatically. For non-GADM data, the builder asks you to assign shapefiles to Level 0 and optional Levels 1–5; press Enter whenever the hierarchy ends. It uses ordinary Python 3 and requires no pip packages, GDAL, GeoPandas, or Fiona. See the [complete builder instructions](BoundaryPluginBuilder/README.md).
 
 ## How to use
 
