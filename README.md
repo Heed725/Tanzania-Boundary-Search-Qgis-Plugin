@@ -11,8 +11,11 @@ Type a Tanzanian place name in QGIS's native **Coordinate** field and instantly 
 [![Version](https://img.shields.io/badge/version-1.0.0-00AEEF?style=for-the-badge)](TanzaniaBoundarySearch/CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](TanzaniaBoundarySearch/LICENSE)
 [![Tanzania](https://img.shields.io/badge/Made%20for-Tanzania-1EB53A?style=for-the-badge)](https://en.wikipedia.org/wiki/Tanzania)
+[![Plugin Builder](https://img.shields.io/badge/Builder-Windows%20BAT-0078D6?style=for-the-badge&logo=windows&logoColor=white)](BoundaryPluginBuilder/)
 
 ### [⬇️ Download TanzaniaBoundarySearch.zip](https://github.com/Heed725/Tanzania-Boundary-Search-Qgis-Plugin/raw/refs/heads/main/TanzaniaBoundarySearch.zip)
+
+### [🛠️ Download BoundaryPluginBuilder.zip](https://github.com/Heed725/Tanzania-Boundary-Search-Qgis-Plugin/raw/refs/heads/main/BoundaryPluginBuilder.zip)
 
 </div>
 
@@ -50,6 +53,18 @@ Normal coordinate entry such as `39.967, -7.460` continues to work.
 5. Choose the downloaded ZIP and approve the installation prompt.
 6. Restart QGIS if replacing an earlier version.
 
+## Build a plugin for another country or continent
+
+The included Windows pipeline can create another boundary-search plugin for **Africa, Nigeria, the Philippines, or another area**.
+
+1. Download and extract **[BoundaryPluginBuilder.zip](https://github.com/Heed725/Tanzania-Boundary-Search-Qgis-Plugin/raw/refs/heads/main/BoundaryPluginBuilder.zip)**.
+2. Double-click `build_boundary_plugin.bat`.
+3. Enter the area name.
+4. Choose an SVG/PNG icon and a ZIP containing complete shapefiles.
+5. Install the generated ZIP from QGIS's **Install from ZIP** page.
+
+The builder uses ordinary Python 3 and requires no pip packages, GDAL, GeoPandas, or Fiona. See the [complete builder instructions](BoundaryPluginBuilder/README.md).
+
 ## How to use
 
 1. Click the value beside **Coordinate** in the QGIS status bar.
@@ -63,6 +78,8 @@ When several boundaries share a name, the autocomplete label includes its parent
 
 - [`TanzaniaBoundarySearch/`](TanzaniaBoundarySearch/) — complete plugin source and bundled boundary data
 - [`TanzaniaBoundarySearch.zip`](TanzaniaBoundarySearch.zip) — ready-to-install QGIS plugin
+- [`BoundaryPluginBuilder/`](BoundaryPluginBuilder/) — reusable BAT/Python plugin-building pipeline
+- [`BoundaryPluginBuilder.zip`](BoundaryPluginBuilder.zip) — ready-to-download Windows builder
 - [`CHANGELOG.md`](TanzaniaBoundarySearch/CHANGELOG.md) — version history
 - [`LICENSE`](TanzaniaBoundarySearch/LICENSE) — MIT license for the plugin source
 
